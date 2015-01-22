@@ -15,7 +15,7 @@ var task = function (conf) {
 				"writeable": true, 
 				"enumerable": false, 
 				"value": result[key]
-			})
+			});
 		});
 	}
 }
@@ -39,7 +39,7 @@ function merge(base, params) {
 	}
 	Object.keys(params).forEach(function (key) {
 		r[key] = params[key];
-	}
+	});
 	return r;
 }
 

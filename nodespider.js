@@ -4,15 +4,20 @@ var fw = require('./watcher'),
     confs = [];
 
 // configration folder to monitor
-var confs_path = './tasks/';
+var confs_path = './tasks/', 
+	confs;
 
 // start spider excution
 function start() {
+	// init default configuration
+	confs = initConf();
+	// command line support
+	argsReader();
 	// create a watcher to monitor all file changes in the configration folder
-	var watcher = new fw(confs_path);
+	var watcher = new fw(confs);
 
-	var fileItem, 
-		fileContent, 
+	var fi, 
+		fc, 
 		handler = 
 			function (fileStatus) {
 				// fileStatus is an array contains multiple objects which
@@ -22,43 +27,70 @@ function start() {
 				// 	file name
 				// 	etc.
 				for (var i = fileStatus.length - 1; i >= 0; i--) {
-					fileItem = fileStatus[i];
+					fi = fileStatus[i];
 					// different mode will cause different action,
 					// the 'gather' has all needed functions to handle
 					// these file changes.
-					switch (fileItem.mode) {
+					switch (fi.mode) {
 						// file(s) or folder(s) is(are) added
 						case "add" : 
-							if (fileItem.type === "file") {
-								fileContent = match(fileItem.name, confs_path);
-								if (fileContent) {
-									gather.g(fileItem.name, fileContent);
+							if (fi.type === "f") {
+								fc = match(fi.file.name, confs_path);
+								if (fc) {
+									gather.g(fi.file.name, fc);
 								}
 							}
 						break;
 						// file(s) or folder(s) is(are) deleted
 						case "remove" : 
-							if (fileItem.type === "file") {
-								gather.r(fileItem.name);
+							if (fi.type === "f") {
+								gather.r(fi.file.name);
 							}
 						break;
 						// file(s) is(are) modified, only file(s) change 
 						// can trigger this mode
 						case "modify" : 
-							fileContent = match(fileItem.name, confs_path);
-							gather.m(fileItem.name, fileContent);
+							fc = match(fi.name, confs_path);
+							gather.m(fi.file.name, fc);
 						break;
 					}
 				};
 
-				// maintain updated tasks sequence
+				// maintain updated task's sequence
 				scheduler.m(gather.tasks);
 			};
 
 	// event listener for changes
 	watcher.on("update", handler);
 	// watch for file changes every 1000 miliseconds
-	watcher.start(1000);
+	watcher.start(5000, confs_path);
+}
+
+function argsReader() {
+	var args = process.argv.slice(2);
+	if (args && args.length) {
+		console.log("Main: Parameters -> " + args);
+		// watching folder
+		confs_path = _argsReader("-path", args) || confs_path;
+		// async IO operations
+		confs.async = _argsReader("-async", args) == "true";
+	}
+}
+
+function _argsReader(prop, args) {
+	var i = args.indexOf(prop);
+	if (i != -1) {
+		return args[i + 1];
+	} else {
+		return null;
+	}
+}
+
+function initConf() {
+	var c = {};
+	c.folder = confs_path;
+	c.async = true;
+	return c;
 }
 
 // match given path and filename, and try to resolve it's content.
@@ -82,7 +114,7 @@ function match(fileName, _path) {
 function safeExt(fileName) {
 	var split = fileName.split(".");
 
-	//  eg:/etc/hsots, ~/.npm  
+	//  eg:/etc/hsots, ~/.bashrc  
 	if (split.length == 1 || (split[0] === "" && split.length == 2)) {
 		return "";
 	} else {
