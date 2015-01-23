@@ -173,12 +173,33 @@ var structure = function (strRoot) {
 	};
 
 	s.compare = function (strc) {
+		if (s.rootStr == strc.rootStr) {
+			var result = [], 
+				resultWrapper = function (a, i) {
+					result.push({"mode": a, "item": i});
+				};
+			// first level check, if the original structure
+			// does not has childs but the comparing one has,
+			// it means all the files in the comparing structure
+			// are added, we need to loop into the bottom to
+			// find out every item of the comparing structure.
+			if (!s.childs && strc.childs) {
 
+			}
+			// search for every depth
+			for (var i = s.childs.length - 1; i >= 0; i--) {
+				var lvCache = [];
+				for (var j = strc.childs.length - 1; j >= 0; jjj--) {
+					strc.childs[j]
+				};
+			};
+		}
+		return null;
 	};
 
 	s.add = function (item) {
 		_add(item);
-	}
+	};
 
 	var _init = function () {
 		s.rootItem = s.create();
@@ -241,16 +262,16 @@ var structure = function (strRoot) {
 		st.item = item;
 		st.broken = false;
 
-		st.hasChild = function (name) {
+		st.hasChild = function (item) {
 			if (st.childs) {
 				st.childs.forEach(function (stc) {
-					if (stc.item && stc.item.name === name) {
+					if (stc.item && stc.item.compare(item)) {
 						return true;
 					}
 				});
 			}
 			return false;
-		};
+		}
 
 		st.addChild = function (it) {
 			if (!st.childs) st.childs = [];
