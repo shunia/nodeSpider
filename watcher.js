@@ -77,7 +77,7 @@ var watch = function (confs) {
 			// throw error away
 			if (err) throw err;
 
-			if (files.length) console.log("watcher: Files founded -> " + files)
+			// if (files.length) console.log("watcher: Files founded -> " + files)
 
 			// async or not
 			var f = w.async ? _asyncScan : _syncScan;
@@ -121,17 +121,16 @@ var watch = function (confs) {
 	// the branch can be configed in constructor configs.
 	var _stat = function (p, n, a, cb) {
 		var fp = path.resolve(p, n);
-
 		if (a) {
 			fs.stat(fp, function(err, stats) {
 				if (err) throw err;
 
-				_record(p, n, stats);
+				_record(fp, n, stats);
 
 				cb.apply();
 			});
 		} else {
-			_record(p, n, fs.statSync(fp));
+			_record(fp, n, fs.statSync(fp));
 		}
 	};
 
@@ -156,7 +155,8 @@ var watch = function (confs) {
 	var _compare = function () {
 		console.log("watcher: Structure: \n" + w.currentStructure.rootSt);
 		var o = w.currentStructure.compare(w.originalStructure);
-		w.emit("update", o);
+		console.log(o);
+		if (o.length > 0) w.emit("update", o);
 	};
 
 };
@@ -173,28 +173,110 @@ var structure = function (strRoot) {
 	};
 
 	s.compare = function (strc) {
-		if (s.rootStr == strc.rootStr) {
-			var result = [], 
-				resultWrapper = function (a, i) {
-					result.push({"mode": a, "item": i});
-				};
-			// first level check, if the original structure
-			// does not has childs but the comparing one has,
-			// it means all the files in the comparing structure
-			// are added, we need to loop into the bottom to
-			// find out every item of the comparing structure.
-			if (!s.childs && strc.childs) {
+		var result = [], 
+		    resultWrapper = function (a, i1, i2) {
+				return {"mode": a, "item": i, "old": i2};
+			}, 
+			sls_compare_item = function (storage1, storage2) {
+				var it1 = storage1.item, it2 = storage2.item;
+				if (it1.compare(it2)) {
+					// same file/dir
 
-			}
-			// search for every depth
-			for (var i = s.childs.length - 1; i >= 0; i--) {
-				var lvCache = [];
-				for (var j = strc.childs.length - 1; j >= 0; jjj--) {
-					strc.childs[j]
-				};
+					// if dir compare, check has childs first, because dir which
+					// has childs means there are files in it to be modified, not 
+					// the dir itself.So dir compare only happens when they have 
+					// no childs.
+					if (it1.type == "d" && (!storage1.childs || !storage1.childs))
+						return it1.modified(it2);
+					// files should always check modification.
+					if (it1.type == "f") 
+						return it1.modified(it2);
+				}
+				return false;
+			}, 
+			sls_deep_in = function (storage, cb) {
+				var arr = (cb !== null) ? null : [], 
+					_del = function (itm, cb, arr, i) {
+						// item not exists, or item is dir but is ignored.
+						var notValid = item == null || (item.type == "d" && i);
+						if (!notValid) {
+							if (cb != null) cb.apply(null, [itm]);
+							else arr.push(itm);
+						}
+					}, 
+					_deepIn = function (storage, cb) {
+						var st, isLast;
+						for (var k in storage.childs) {
+							st = storage.childs[k];
+							isLast = st.childs ? false : true;
+							cb.apply(storage, [st, isLast]);
+							if (!isLast) _deepIn(st, cb);
+						}
+					};
+				// root directory can not be ignored.
+				_del(storage.item, cb, arr, false);
+				_deepIn(storage, function (itm, isLast) {
+					_del(itm, cb, arr, !isLast);
+				});
+				return arr;
+			}, 
+			sls_compare_childs = function (storage1, storage2, saveTo) {
+				var results = saveTo, 
+					defineProp = Object.definePorperty, 
+					defineProps = Object.defineProperties, 
+					savedToDefine = {};
+				var leftChild = null, 
+					rightChild = null;
+				for (var k in storage1.childs) {
+					if (storage2.hasChild(k)) {
+						leftChild = storage1.childs[k];
+						rightChild = storage2.childs[k];
+						if (sls_compare_item(leftChild, rightChild)) {
+							results.push(resultWrapper("modify", rightChild, leftChild));
+						}
+						// save it now, and after the loop is completed,
+						// all the props saved will be redefined.
+						savedToDefine[k] = {"configurable": true, "enumerable": true, "writable": true, "value": rightChild};
+						// has same key means nothing happend to the 
+						// item which corresponds to the key, so remove
+						// it from storage2's enumerable lists.
+						defineProp.call(
+							storage2.childs, k, 
+							{"configurable": true, "enumerable": false});
+						// recrusive
+						sls_compare_childs(leftChild, rightChild, results);
+					} else {
+						// can not find key means this item is deleted
+						// and deleted item do not need recrusive search
+						/*sls_deep_in(storage1, function (item) {
+							results.push(resultWrapper("remove", item));
+						});*/
+						results.push(resultWrapper("remove", storage1.childs[k].item));
+					}
+				}
+				// loop other keys in storage2, these are files or 
+				// dirs beening added.
+				for (k in storage2.childs) {
+					sls_deep_in(storage2.childs[k], function (item) {
+						results.push(resultWrapper("add", item));
+					});
+				}
+				// unmodify all the props
+				if (storage2.childs) {
+					defineProps.call(storage2.childs, savedToDefine);
+				}
 			};
+		// all changes
+		if (strc == null) {
+			for (k in s.childs) {
+				sls_deep_in(s.childs[k], function (item) {
+					results.push(resultWrapper("add", item));
+				});
+			}
+		} else {
+			sls_compare_childs(strc.rootStr, s.rootStr, result);
 		}
-		return null;
+		return result;
 	};
 
 	s.add = function (item) {
@@ -224,7 +306,7 @@ var structure = function (strRoot) {
 				it.name = pathRelative[i];
 				it.path = path.resolve(c.item.path, it.name);
 				c.addChild(it);
-				c = c.getChild(it.name);
+				c = c.getChild(it);
 			}
 		};
 	};
@@ -249,47 +331,52 @@ var structure = function (strRoot) {
 
 		i.size = null;
 
+		i.getKey = function () {
+			return (i.name ? i.name : "empty") + "_" + i.type;
+		}
+
 		i.compare = function (it) {
 			return i.name === it.name && i.type === it.type && i.path === it.path;
+		}
+
+		i.modified = function (it) {
+			return i.size === it.size && 
+					i.atime.getTime() === it.atime.getTime() && 
+					i.mtime.getTime() === it.mtime.getTime() && 
+					i.ctime.getTime() === it.ctime.getTime();
 		}
 	};
 
 	var storage = function (item) {
 		var st = this;
 
-		st.parent = null;
-		st.childs = null;
-		st.item = item;
-		st.broken = false;
-
-		st.hasChild = function (item) {
-			if (st.childs) {
-				st.childs.forEach(function (stc) {
-					if (stc.item && stc.item.compare(item)) {
-						return true;
-					}
-				});
-			}
-			return false;
+		st.hasChild = function (i) {
+			var k = _toKey(i);
+			return st.childs && st.childs.hasOwnProperty(k);
 		}
 
 		st.addChild = function (it) {
-			if (!st.childs) st.childs = [];
-
+			if (!st.childs) st.childs = {};
+			//console.log(st.key, st.item.name, st.item.path, it.name);
 			var newSt = new storage(it);
 			newSt.parent = st;
-			st.childs.push(newSt);
+			st.childs[_toKey(it)] = newSt;
 		};
 
-		st.getChild = function (name) {
-			if (st.childs) {
+		st.getChild = function (i) {
+			if (!st.childs) return null;
+
+			var k = _toKey(i);
+			return st.childs.hasOwnProperty(k) ? 
+						st.childs[k] : null;
+			/*if (st.childs) {
 				st.childs.forEach(function (stc) {
 					if (stc.item && stc.item.name === name) {
 						return i;
 					}
 				});
 			}
-			return null;
+			return null;*/
 		};
 
 		st.toString = function () {
@@ -305,23 +392,38 @@ var structure = function (strRoot) {
 			return r;
 		}
 
-		var _toString = function (stc, h) {
+		var _toString = function (stc) {
 			var s = "", 
-				a = "", 
-				h = h || 0;
+				a = "";
 			a += stc.parent ? "/" : "";
 			a += stc.item ? stc.item.name : "_empty_storage_";
 			s += a;
 
 			if (stc.childs) {
-				h ++;
-				for (var i = 0; i < stc.childs.length; i++) {
-					s += "\n" + _cpl(a.length, " ") + _toString(stc.childs[i], h);
-				};
+				for (var k in stc.childs) {
+					//console.log(stc.childs);
+					s += "\n" + _cpl(a.length - 1, " ") + _toString(stc.childs[k]);
+				}
 			}
 
 			return s;
 		}
+
+		var _toKey = function (i) {
+			var k;
+			if (typeof(i) === "string") {
+				k = i;
+			} else {
+				k = i.getKey();
+			}
+			return k;
+		};
+
+		st.item = item;
+		st.key = _toKey(st.item);
+		st.parent = null;
+		st.childs = null;
+		st.broken = false;
 	};
 
 	_init();
