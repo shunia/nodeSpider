@@ -1,46 +1,59 @@
+var util = require('util'), 
+	utils = require('./utils'), 
+	crawler = require('./_crawler');
 
-var task = function (conf) {
+var task = function (name, conf) {
 	var t = this;
+	t.name = name;
+	t.conf = {};
+	t.running = false;
 
-	if (!valid(conf)) {
-		t.valid = false;
-	} else {
-		t.valid = true;
+	t.update = function (conf) {
+		t.validate.apply(null, [conf]);
 
-		t._conf = conf;
+		if (t.valid) {
+			utils.merge(t.conf, _base(t._conf.base), _params(t._conf.params));
+			// console.log(t.name + ": ");
+			// console.log(t.conf);
+			this.setProps(t.conf);
+		}
+	};
 
-		var result = merge(_base(conf.base), _params(conf.params));
-		Object.keys(result).forEach(function (key) {
-			Object.defineProperty(t, key, {
-				"writeable": true, 
-				"enumerable": false, 
-				"value": result[key]
-			});
-		});
+	t.validate = function (conf) {
+		t.valid = conf.base || conf.params;
+		t._conf = t.valid ? conf : null;
+	};
+
+	t.start = function () {
+		t.running = true;
+		console.log("task starting: " + t.name);
+	};
+
+	t.restart = function () {
+		console.log("task restarting: " + t.name);
+		t.stop.apply();
+		t.start.apply();
+		console.log("task restarted: " + t.name);
+	};
+
+	t.stop = function () {
+		t.running = false;
+		console.log("task stopping: " + t.name);
+	};
+
+	var _base = function (conf) {
+		return conf;
+	};
+
+	var _params = function (conf) {
+		return conf;
+	};
+
+	if (conf) {
+		t.update.apply(null, [conf]);
 	}
 }
 
-function valid(conf) {
-	return conf.base || conf.params;
-}
-
-function _base(conf) {
-	return conf;
-}
-
-function _params(conf) {
-	return conf;
-}
-
-function merge(base, params) {
-	var r = {};
-	for (var key in base) {
-		r[key] = base[key];
-	}
-	Object.keys(params).forEach(function (key) {
-		r[key] = params[key];
-	});
-	return r;
-}
+util.inherits(task, crawler);
 
 module.exports = task;

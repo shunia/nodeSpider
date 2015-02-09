@@ -1,6 +1,7 @@
-var fw = require('./watcher'), 
+var fs = require('fs'), 
+	path = require('path'), 
+	fw = require('./module/fswatcher/fswatcher'), 
 	gather = require('./gather'), 
-	scheduler = require('./scheduler'), 
     confs = [];
 
 // configration folder to monitor
@@ -16,8 +17,15 @@ function start() {
 	// create a watcher to monitor all file changes in the configration folder
 	var watcher = new fw(confs);
 
-	var fi, 
-		fc, 
+	var fi, // file object invoked by fswatcher
+		fc, // file content
+		toItemName = 
+			function (item) {
+				var re = path.relative(confs_path, item.path), 
+					p = re.split(path.sep), 
+					result = p.join("-");
+				return result;
+			}, 
 		handler = 
 			function (fileStatus) {
 				// fileStatus is an array contains multiple objects which
@@ -26,38 +34,38 @@ function start() {
 				// 	file change mode(add, remove, modify), 
 				// 	file name
 				// 	etc.
-				for (var i = fileStatus.length - 1; i >= 0; i--) {
+				// console.log(fileStatus);
+				var l = fileStatus.length;
+				for (var i = 0; i < l; i++) {
 					fi = fileStatus[i];
-					// different mode will cause different action,
-					// the 'gather' has all needed functions to handle
-					// these file changes.
-					switch (fi.mode) {
-						// file(s) or folder(s) is(are) added
-						case "add" : 
-							if (fi.type === "f") {
-								fc = match(fi.file.name, confs_path);
+					// console.log("file index: " + i + ", file item: ");
+					// console.log(fi);
+					// accepts file only
+					if (fi.item.isFile) {
+						// different mode will cause different action,
+						// the 'gather' has all needed functions to handle
+						// these file changes.
+						switch (fi.mode) {
+							// file(s) or folder(s) is(are) added
+							case "add" : 
+								fc = match(fi.item.path);
 								if (fc) {
-									gather.g(fi.file.name, fc);
+									gather.g(toItemName(fi.item), fc);
 								}
-							}
-						break;
-						// file(s) or folder(s) is(are) deleted
-						case "remove" : 
-							if (fi.type === "f") {
-								gather.r(fi.file.name);
-							}
-						break;
-						// file(s) is(are) modified, only file(s) change 
-						// can trigger this mode
-						case "modify" : 
-							fc = match(fi.name, confs_path);
-							gather.m(fi.file.name, fc);
-						break;
+							break;
+							// file(s) or folder(s) is(are) deleted
+							case "remove" : 
+								gather.r(toItemName(fi.item));
+							break;
+							// file(s) is(are) modified, only file(s) change 
+							// can trigger this mode
+							case "modify" : 
+								fc = match(fi.item.path);
+								gather.m(toItemName(fi.item), fc);
+							break;
+						}
 					}
-				};
-
-				// maintain updated task's sequence
-				scheduler.m(gather.tasks);
+				}
 			};
 
 	// event listener for changes
@@ -98,22 +106,25 @@ function initConf() {
 // when "js" file matched, dynamiclly require it to be handled,
 // when "json" file matched, read the content of the json file 
 // and parse it to object to be handled.
-function match(fileName, _path) {
-	var ext = safeExt(fileName);
+function match(filePath) {
+	var ext = safeExt(filePath), 
+		content = null;
 	if (ext === "js") {
-		return require(path.join(_path, fileName));
+		content = require(filePath);
 	} else if (ext === "json") {
-		return JSON.parse(fs.readFileSync(path.join(_path + fileName), "utf8"));
-	} else {
-		return null;
+		content = JSON.parse(fs.readFileSync(filePath, "utf8"));
 	}
+
+	// console.log("file content at " + filePath);
+	// console.log(content);
+
+	return content;
 }
 
 // handy function to get extension(in string) of given file name,
 // and lower-case it.
 function safeExt(fileName) {
 	var split = fileName.split(".");
-
 	//  eg:/etc/hsots, ~/.bashrc  
 	if (split.length == 1 || (split[0] === "" && split.length == 2)) {
 		return "";

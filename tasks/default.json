@@ -1,5 +1,6 @@
 {
 	"base": {
+		"url": "http://www.baidu.com"
 	}, 
 	"params": {
 		"headers": {

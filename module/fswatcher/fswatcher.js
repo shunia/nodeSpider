@@ -1,10 +1,11 @@
-var util = require('util'), 
-	fs = require('fs'), 
+var reader = require('./dirreader'), 
+	util = require('util'), 
+	
 	path = require('path'), 
 	events = require('events');
 
 // constructor for watching task
-var watch = function (confs) {
+var watcher = function (confs) {
 	// save for conflicts
 	var w = this;
 	// flag to indicate whether inited or not
@@ -23,6 +24,9 @@ var watch = function (confs) {
 	w.originalStructure = null;
 	// new file stat infos
 	w.currentStructure = null;
+
+	// asynchrous and recrusive directory reader
+	var rd = new reader(true, w.async);
 
 	w.start = function (intervel, folder) {
 		w.root = folder;
@@ -51,18 +55,33 @@ var watch = function (confs) {
 				function () {
 					// stop first, and wait for file stat finished
 					_stop();
-					// constructs new structure for compare before 
-					// _scan starts
-					w.originalStructure = w.currentStructure;
-					w.currentStructure = new structure(w.root);
 					// start scan
-					_scan(w.root);
+					rd.read(w.root, function (files) {
+						// handle all files read.
+						_handle.apply(null, [files]);
+					});
 				};
 			w.__start.apply();
 		} else {
 			w.interval = setInterval(w.__start, w.checkRate);
 		}
 	};
+
+	var _handle = function (files) {
+		// constructs new structure for compare
+		w.originalStructure = w.currentStructure;
+		w.currentStructure = new structure(files.shift());
+		// first record all files into item object and store
+		// into structure
+		var l = files.length;
+		for (var i = l - 1; i >= 0; i--) {
+			w.currentStructure.add(files[i]);
+		};
+		// start structure compare
+		_compare.apply();
+		// resart
+		_start.apply();
+	}
 
 	var _stop = function () {
 		// clear interval if exists
@@ -72,125 +91,53 @@ var watch = function (confs) {
 		}
 	};
 
-	var _scan = function (p) {
-		fs.readdir(p, function (err, files) {
-			// throw error away
-			if (err) throw err;
-
-			// if (files.length) console.log("watcher: Files founded -> " + files)
-
-			// async or not
-			var f = w.async ? _asyncScan : _syncScan;
-			f.apply(null, [p, files, function () {
-				// start compare
-				_compare();
-				// retrigger scan to check modification
-				_start();
-			}]);
-		});
-	};
-
-	var _asyncScan = function (p, files, cb) {
-		var l = files.length;
-
-		for (var i = files.length - 1; i >= 0; i--) {
-			_stat(p, files[i], true, function () {
-				l --;
-				if (l == 0) {
-					if (cb != null) cb.apply();
-				}
-			});
-		};
-	};
-
-	var _syncScan = function (p, files, cb) {
-		for (var i = files.length - 1; i >= 0; i--) {
-			_stat(p, files[i], false);
-		};
-
-		if (cb != null) cb.apply();
-	}
-
-	// record every file's detail,use fs.stat for file info.
-	// because we need to count files which has been stat,
-	// since there will be a lot IO operation here, if the IO 
-	// operations are asynchronous, and chances that when IO time is 
-	// longer than watch interval, the next _scan call may interrupt 
-	// the process of all the other operations(record, compare, etc.),
-	// the _stat function should have options for async or not, and 
-	// the branch can be configed in constructor configs.
-	var _stat = function (p, n, a, cb) {
-		var fp = path.resolve(p, n);
-		if (a) {
-			fs.stat(fp, function(err, stats) {
-				if (err) throw err;
-
-				_record(fp, n, stats);
-
-				cb.apply();
-			});
-		} else {
-			_record(fp, n, fs.statSync(fp));
-		}
-	};
-
-	var _record = function (p, n, stats) {
-		var item = w.currentStructure.create();
-		if (stats.isFile()) {
-			item.type = "f";
-			item.name = n;
-			item.path = p;
-			item.size = stats.size;
-			item.atime = stats.atime;
-			item.mtime = stats.mtime;
-			item.ctime = stats.ctime;
-		} else {
-			item.name = path.basename(p);
-			item.type = "d";
-			item.path = p;
-		}
-		w.currentStructure.add(item);
-	};
-
 	var _compare = function () {
-		console.log("watcher: Structure: \n" + w.currentStructure.rootSt);
+		// console.log("watcher: Structure: \n" + w.currentStructure.rootSt);
 		var o = w.currentStructure.compare(w.originalStructure);
-		console.log(o);
+		// console.log(o);
 		if (o.length > 0) w.emit("update", o);
 	};
 
 };
 
-var structure = function (strRoot) {
+var structure = function (rootItem) {
 	var s = this;
 
-	s.rootStr = strRoot;
 	s.rootSt = null;
-	s.rootItem = null;
-
-	s.create = function () {
-		return new item();
-	};
+	s.rootItem = rootItem;
 
 	s.compare = function (strc) {
 		var result = [], 
 		    resultWrapper = function (a, i1, i2) {
-				return {"mode": a, "item": i, "old": i2};
+				return {"mode": a, "item": i1, "old": i2};
 			}, 
 			sls_compare_item = function (storage1, storage2) {
+				var compareItem = function (it1, it2) {
+					return it1.name === it2.name 
+							&& it1.isFile === it2.isFile 
+							&& it1.path === it2.path;
+				};
+				var checkItemModified = function (it1, it2) {
+					return !(it1.size === it2.size && 
+							it1.atime.getTime() === it2.atime.getTime() && 
+							it1.mtime.getTime() === it2.mtime.getTime() && 
+							it1.ctime.getTime() === it2.ctime.getTime());
+				};
+
 				var it1 = storage1.item, it2 = storage2.item;
-				if (it1.compare(it2)) {
+				if (compareItem(it1, it2)) {
 					// same file/dir
 
 					// if dir compare, check has childs first, because dir which
 					// has childs means there are files in it to be modified, not 
 					// the dir itself.So dir compare only happens when they have 
 					// no childs.
-					if (it1.type == "d" && (!storage1.childs || !storage1.childs))
-						return it1.modified(it2);
+					if (!it1.isFile && !storage1.childs && !storage2.childs) {
+						return checkItemModified(it1, it2);
+					}
 					// files should always check modification.
-					if (it1.type == "f") 
-						return it1.modified(it2);
+					if (it1.isFile) 
+						return checkItemModified(it1, it2);
 				}
 				return false;
 			}, 
@@ -198,7 +145,7 @@ var structure = function (strRoot) {
 				var arr = (cb !== null) ? null : [], 
 					_del = function (itm, cb, arr, i) {
 						// item not exists, or item is dir but is ignored.
-						var notValid = item == null || (item.type == "d" && i);
+						var notValid = itm == null || (!itm.isFile && i);
 						if (!notValid) {
 							if (cb != null) cb.apply(null, [itm]);
 							else arr.push(itm);
@@ -222,7 +169,7 @@ var structure = function (strRoot) {
 			}, 
 			sls_compare_childs = function (storage1, storage2, saveTo) {
 				var results = saveTo, 
-					defineProp = Object.definePorperty, 
+					defineProp = Object.defineProperty, 
 					defineProps = Object.defineProperties, 
 					savedToDefine = {};
 				var leftChild = null, 
@@ -232,7 +179,7 @@ var structure = function (strRoot) {
 						leftChild = storage1.childs[k];
 						rightChild = storage2.childs[k];
 						if (sls_compare_item(leftChild, rightChild)) {
-							results.push(resultWrapper("modify", rightChild, leftChild));
+							results.push(resultWrapper("modify", rightChild.item, leftChild.item));
 						}
 						// save it now, and after the loop is completed,
 						// all the props saved will be redefined.
@@ -240,14 +187,15 @@ var structure = function (strRoot) {
 						// has same key means nothing happend to the 
 						// item which corresponds to the key, so remove
 						// it from storage2's enumerable lists.
-						defineProp.call(
-							storage2.childs, k, 
-							{"configurable": true, "enumerable": false});
+						defineProp.apply(
+							storage2.childs, 
+							[storage2.childs, k, 
+								{"configurable": true, "enumerable": false}]);
 						// recrusive
 						sls_compare_childs(leftChild, rightChild, results);
 					} else {
 						// can not find key means this item is deleted
-						// and deleted item do not need recrusive search
+						// and deleted item does not need recrusive search
 						/*sls_deep_in(storage1, function (item) {
 							results.push(resultWrapper("remove", item));
 						});*/
@@ -263,18 +211,19 @@ var structure = function (strRoot) {
 				}
 				// unmodify all the props
 				if (storage2.childs) {
-					defineProps.call(storage2.childs, savedToDefine);
+					defineProps.apply(storage2.childs, 
+						[storage2.childs, savedToDefine]);
 				}
 			};
 		// all changes
-		if (strc == null) {
-			for (k in s.childs) {
-				sls_deep_in(s.childs[k], function (item) {
-					results.push(resultWrapper("add", item));
+		if (strc === null) {
+			for (k in s.rootSt.childs) {
+				sls_deep_in(s.rootSt.childs[k], function (item) {
+					result.push(resultWrapper("add", item));
 				});
 			}
 		} else {
-			sls_compare_childs(strc.rootStr, s.rootStr, result);
+			sls_compare_childs(strc.rootSt, s.rootSt, result);
 		}
 		return result;
 	};
@@ -284,31 +233,36 @@ var structure = function (strRoot) {
 	};
 
 	var _init = function () {
-		s.rootItem = s.create();
-		s.rootItem.path = s.rootStr;
-		s.rootItem.type = "d";
-		s.rootItem.name = s.rootStr;
 		s.rootSt = new storage(s.rootItem);
 	}
 
 	var _add = function (item) {
-		var it, n, 
-			c = s.rootSt, 
-			pathRelative = _resolve(item.path, c.item.path);
-
-		for (var i = 0; i < pathRelative.length; i++) {
-			if (i == (pathRelative.length - 1)) {
-				// the last one, just add
-				c.addChild(item);
-			} else {
-				it = s.create();
-				it.type = "d";
-				it.name = pathRelative[i];
-				it.path = path.resolve(c.item.path, it.name);
-				c.addChild(it);
-				c = c.getChild(it);
+		var c = s.rootSt, tmp = c, 
+			pathRelative = _resolve(item.path, c.item.path), 
+			p;
+		// console.log("Adding: ");
+		// console.log("  " + item.path);
+		while (pathRelative.length) {
+			p = pathRelative.shift();
+			if (!p || p.length == 0) continue;
+			if (tmp.hasChild(p)) {
+				// console.log("    continue: " + p);
+				tmp = tmp.getChild(null, p);
+			} else if (p != item.name) {
+				// console.log("    adddir: " + p);
+				tmp = tmp.addChild(null, p);
 			}
-		};
+		}
+
+		if (tmp) {
+			if (item.name == tmp.key) {
+				// console.log("    insert: " + item.name + " to " + tmp.key + ", p=" + p);
+				tmp.insertItem(item);
+			} else {
+				// console.log("    addchild: " + item.name + " to " + tmp.key + ", p=" + p);
+				tmp.addChild(item);
+			}
+		}
 	};
 
 	var _resolve = function (n, o) {
@@ -316,71 +270,38 @@ var structure = function (strRoot) {
 		return r.replace("..", "").split(path.sep);
 	};
 
-	var item = function () {
-		var i = this;
-		// file name, only works when type == 'f'
-		i.name = null;
-		// 'd' for directory, 'f' for file
-		i.type = null;
-		// current file path
-		i.path = null;
-
-		i.atime = null;
-		i.mtime = null;
-		i.ctime = null;
-
-		i.size = null;
-
-		i.getKey = function () {
-			return (i.name ? i.name : "empty") + "_" + i.type;
-		}
-
-		i.compare = function (it) {
-			return i.name === it.name && i.type === it.type && i.path === it.path;
-		}
-
-		i.modified = function (it) {
-			return i.size === it.size && 
-					i.atime.getTime() === it.atime.getTime() && 
-					i.mtime.getTime() === it.mtime.getTime() && 
-					i.ctime.getTime() === it.ctime.getTime();
-		}
-	};
-
-	var storage = function (item) {
+	var storage = function (item, key) {
 		var st = this;
 
-		st.hasChild = function (i) {
-			var k = _toKey(i);
+		st.hasChild = function (it, key) {
+			var k = _toKey(it, key);
 			return st.childs && st.childs.hasOwnProperty(k);
 		}
 
-		st.addChild = function (it) {
+		st.addChild = function (it, key) {
 			if (!st.childs) st.childs = {};
 			//console.log(st.key, st.item.name, st.item.path, it.name);
-			var newSt = new storage(it);
+			var newSt = new storage(it, key);
 			newSt.parent = st;
-			st.childs[_toKey(it)] = newSt;
+			st.childs[newSt.key] = newSt;
+			return newSt;
 		};
 
-		st.getChild = function (i) {
+		st.getChild = function (it, key) {
 			if (!st.childs) return null;
 
-			var k = _toKey(i);
+			var k = _toKey(it, key);
 			return st.childs.hasOwnProperty(k) ? 
 						st.childs[k] : null;
-			/*if (st.childs) {
-				st.childs.forEach(function (stc) {
-					if (stc.item && stc.item.name === name) {
-						return i;
-					}
-				});
-			}
-			return null;*/
+		};
+
+		st.insertItem = function (it) {
+			st.item = it;
+			st.key = _toKey(it);
 		};
 
 		st.toString = function () {
-			return _toString(st);
+			return _toString(st, 0);
 		};
 
 		var _cpl = function (c, d) {
@@ -392,43 +313,42 @@ var structure = function (strRoot) {
 			return r;
 		}
 
-		var _toString = function (stc) {
+		var _toString = function (stc, len) {
 			var s = "", 
-				a = "";
-			a += stc.parent ? "/" : "";
+				a = _cpl(len, " ");
+			a += stc.parent ? path.sep : "";
 			a += stc.item ? stc.item.name : "_empty_storage_";
 			s += a;
 
 			if (stc.childs) {
 				for (var k in stc.childs) {
-					//console.log(stc.childs);
-					s += "\n" + _cpl(a.length - 1, " ") + _toString(stc.childs[k]);
+					s += "\n" + _toString(stc.childs[k], a.length);
 				}
 			}
 
 			return s;
 		}
 
-		var _toKey = function (i) {
-			var k;
-			if (typeof(i) === "string") {
-				k = i;
+		var _toKey = function (it, key) {
+			var i = it ? it : key;
+			if (!i) {
+				return "__empty__";
+			} else if (typeof(i) === "string") {
+				return k = i;
 			} else {
-				k = i.getKey();
+				return i.name ? i.name : "empty";
 			}
-			return k;
 		};
 
 		st.item = item;
-		st.key = _toKey(st.item);
+		st.key = _toKey(item, key);
 		st.parent = null;
 		st.childs = null;
-		st.broken = false;
 	};
 
 	_init();
 }
 
-util.inherits(watch, events.EventEmitter);
+util.inherits(watcher, events.EventEmitter);
 
-module.exports = watch;
+module.exports = watcher;
