@@ -1,6 +1,6 @@
-var query = require('querystring');
-
-var form = query.stringify({
+var query = require('querystring'), 
+	i = 0, 
+	form = query.stringify({
 								homCur:'CNY', 
 								forCur:'USD', 
 								fee:0, 
@@ -12,7 +12,12 @@ var form = query.stringify({
 								lastDate:'01/19/2015', 
 								actualDate:'01-19-2015'
 							}), 
-	opt = {
+	opt = function () {
+		i ++;
+		optDefault.flag = i;
+		return optDefault;
+	}, 
+	optDefault = {
 		hostname: 'usa.visa.com', 
 		port: 80, 
 		path: '/personal/card-benefits/travel/exchange-rate-calculator-results.jsp', 

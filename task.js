@@ -3,28 +3,34 @@ var util = require('util'),
 	crawler = require('./_crawler');
 
 var task = function (name, conf) {
+	// to init super class
+	task.super_.apply(this, arguments);
+	// definetion below
 	var t = this;
 	t.name = name;
-	t.conf = {};
+	t.conf = null;
 	t.running = false;
+	t.times = 0;
+	// secheduded task interval
+	t.interval = 0;
+	t.valid = false;
 	// saved dynamic variables
 	t.sdv = null;
 
 	t.update = function (conf) {
-		t.validate.apply(null, [conf]);
-
-		if (t.valid) {
-			utils.merge(t.conf, _base(t._conf.base), _params(t._conf.params));
-			// console.log(t.name + ": ");
-			// console.log(t.conf);
+		t.conf = t.validate(conf);
+		if (t.valid && t.conf) {
+			console.log(t.name + ": ");
+			console.log(t.conf);
 			t.sdv = _filterFuncs(t.conf);
-			this.setProps(t.conf);
+			t.setProps(t.conf);
 		}
 	};
 
 	t.validate = function (conf) {
-		t.valid = conf.base || conf.params;
-		t._conf = t.valid ? conf : null;
+		t.valid = conf.base !== undefined || conf.params !== undefined;
+		return t.valid ? 
+				utils.merge(_base(conf.base), _params(conf.params)) : null;
 	};
 
 	t.start = function () {
@@ -58,11 +64,19 @@ var task = function (name, conf) {
 	};
 
 	var _base = function (conf) {
-		return conf;
+		if (typeof conf === "function") {
+			return conf.call(t);
+		} else {
+			return conf;
+		}
 	};
 
 	var _params = function (conf) {
-		return conf;
+		if (typeof conf === "function") {
+			return conf.call(t);
+		} else {
+			return conf;
+		}
 	};
 
 	var _resolve = function (conf) {
@@ -79,18 +93,20 @@ var task = function (name, conf) {
 		t.send(resolver);
 	};
 
-	// initialize
-	if (conf) {
-		t.update.apply(null, [conf]);
-	}
-
 	var resolver = function (req, res) {
 		if (!t.conf.hasOwnProperty("resolve")) return;
 
 		var r = t.conf.resolve;
 	};
-}
+
+	// initialize
+	if (conf) {
+		t.update(conf);
+	}
+};
 
 util.inherits(task, crawler);
+
+// console.log(utils.merge({"a":1}, {"b":2}));
 
 module.exports = task;

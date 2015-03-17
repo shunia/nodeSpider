@@ -30,7 +30,8 @@ var utils = {
 		var objects = Array.prototype.slice.call(arguments, 0), 
 			first = objects.length > 0 ? 
 						objects.length == 1 ? {} : objects.shift() : null;
-		// console.log("[merge] objects: " + objects);
+		// console.log("[merge] objects: ");
+		// console.log(objects);
 		// works only when needed
 		if (first) {
 			var tomerge = null, // temp variable to store the next object to be merged
