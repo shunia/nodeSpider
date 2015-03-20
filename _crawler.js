@@ -69,6 +69,7 @@ _crawler.prototype.close = function () {
 
 // handle data and send out request
 _crawler._send = function (cb) {
+	console.log("sending...");
 	console.log(this.opts);
 	// generate request
 	var req = http.request(this.opts, function (res) {

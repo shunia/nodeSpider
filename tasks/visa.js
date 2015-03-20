@@ -13,6 +13,7 @@ var query = require('querystring'),
 								actualDate:'01-19-2015'
 							}), 
 	opt = function () {
+		console.log(this);
 		i ++;
 		optDefault.flag = i;
 		return optDefault;
